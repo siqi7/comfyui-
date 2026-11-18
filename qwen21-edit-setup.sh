@@ -16,8 +16,9 @@ PIP_MIRROR="https://mirrors.aliyun.com/pypi/simple/"
 MS_MODEL="Comfy-Org/Qwen-Image-2.1"
 
 # GitHub 加速代理（前缀式）。脚本会依次尝试，谁通用谁。
-# 这类站点生命周期不稳定，多放几个，任一可用即可。
+# 第一个是自建代理，优先走它；公共代理作为后备，这类站点生命周期不稳定。
 GH_PROXIES=(
+  "https://dl.7117777.xyz/"
   "https://gh-proxy.com/"
   "https://ghfast.top/"
   "https://github.moeyy.xyz/"
