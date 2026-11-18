@@ -107,62 +107,62 @@ step_comfy() {
       warn "目录存在但不完整，清理后重新拉取"
       rm -rf "$COMFY_DIR"
     fi
-    local cloned=0 u p
-    local urls=()
-    for p in "${GH_PROXIES[@]}"; do
-      urls+=("${p}https://github.com/comfyanonymous/ComfyUI.git")
-    done
-    for p in "${GH_HOSTS[@]}"; do
-      urls+=("${p}comfyanonymous/ComfyUI.git")
-    done
-    urls+=("https://gitclone.com/github.com/comfyanonymous/ComfyUI.git")
-    urls+=("https://github.com/comfyanonymous/ComfyUI.git")
+    local cloned=0 u p inner=""
+    local zp="${WORKDIR}/ComfyUI.zip"
+    local zip_rel="https://github.com/comfyanonymous/ComfyUI/archive/refs/heads/master.zip"
 
-    for u in "${urls[@]}"; do
-      info "clone: $u"
-      if timeout 420 git clone --depth 1 \
-           --config http.lowSpeedLimit=1000 --config http.lowSpeedTime=60 \
-           "$u" "$COMFY_DIR" 2>"${LOG_DIR}/clone.log"; then
-        cloned=1; break
-      fi
-      rm -rf "$COMFY_DIR"
-      warn "该源失败或超时，换下一个"
-    done
-    # clone 全失败 -> 退化为下载 zip 包，避免卡死在 clone 上
-    if [ "$cloned" -eq 0 ]; then
-      warn "所有 clone 源都失败，改用 zip 包方式"
-      local zp="${WORKDIR}/ComfyUI.zip"
-      local zip_rel="https://github.com/comfyanonymous/ComfyUI/archive/refs/heads/master.zip"
-      local zurls=()
-      for p in "${GH_PROXIES[@]}"; do zurls+=("${p}${zip_rel}"); done
-      zurls+=("$zip_rel")
+    # ① 优先下载源码 zip：curl 能精确止损，国内比 git 协议稳得多
+    local zurls=()
+    for p in "${GH_PROXIES[@]}"; do zurls+=("${p}${zip_rel}"); done
+    zurls+=("$zip_rel")
 
-      for u in "${zurls[@]}"; do
-        info "下载 zip: $u"
-        rm -f "$zp"
-        if curl -fL --retry 1 --connect-timeout 15 --max-time 420 \
-             --speed-limit 2048 --speed-time 30 -o "$zp" "$u" 2>/dev/null; then
-          rm -rf "${WORKDIR}/_comfy_zip"
-          if python -m zipfile -e "$zp" "${WORKDIR}/_comfy_zip" 2>/dev/null; then
-            local inner
-            inner=$(find "${WORKDIR}/_comfy_zip" -maxdepth 1 -mindepth 1 -type d | head -1)
-            if [ -n "$inner" ]; then
-              mv "$inner" "$COMFY_DIR"
-              rm -rf "${WORKDIR}/_comfy_zip" "$zp"
-              cloned=1
-              ok "已通过 zip 包获取 ComfyUI"
-              break
-            fi
+    for u in "${zurls[@]}"; do
+      info "下载源码包: $u"
+      rm -f "$zp"; rm -rf "${WORKDIR}/_comfy_zip"
+      if curl -fL --connect-timeout 10 --max-time 180 \
+           --speed-limit 30000 --speed-time 20 -o "$zp" "$u" 2>/dev/null; then
+        if python -m zipfile -e "$zp" "${WORKDIR}/_comfy_zip" 2>/dev/null; then
+          inner=$(find "${WORKDIR}/_comfy_zip" -maxdepth 1 -mindepth 1 -type d | head -1)
+          if [ -n "$inner" ] && [ -f "$inner/main.py" ]; then
+            mv "$inner" "$COMFY_DIR"
+            rm -rf "${WORKDIR}/_comfy_zip" "$zp"
+            cloned=1
+            ok "已通过源码包获取 ComfyUI"
+            break
           fi
-          rm -rf "${WORKDIR}/_comfy_zip"
         fi
-        warn "该 zip 源失败，换下一个"
+      fi
+      rm -rf "${WORKDIR}/_comfy_zip"; rm -f "$zp"
+      warn "该源失败，换下一个"
+    done
+
+    # ② zip 全失败再退回 git clone（超时压到 150 秒，且禁掉交互提示）
+    if [ "$cloned" -eq 0 ]; then
+      warn "源码包全部失败，改试 git clone"
+      local urls=()
+      for p in "${GH_PROXIES[@]}"; do
+        urls+=("${p}https://github.com/comfyanonymous/ComfyUI.git")
       done
-      rm -f "$zp"
+      for p in "${GH_HOSTS[@]}"; do
+        urls+=("${p}comfyanonymous/ComfyUI.git")
+      done
+      urls+=("https://gitclone.com/github.com/comfyanonymous/ComfyUI.git")
+      urls+=("https://github.com/comfyanonymous/ComfyUI.git")
+
+      for u in "${urls[@]}"; do
+        info "clone: $u"
+        if GIT_TERMINAL_PROMPT=0 timeout 150 git clone --depth 1 --single-branch \
+             --config http.lowSpeedLimit=30000 --config http.lowSpeedTime=20 \
+             "$u" "$COMFY_DIR" 2>"${LOG_DIR}/clone.log"; then
+          cloned=1; break
+        fi
+        rm -rf "$COMFY_DIR"
+        warn "该源失败，换下一个"
+      done
     fi
 
-    [ "$cloned" -eq 1 ] || die "所有源均失败。手动下载解压到 ${COMFY_DIR} 即可：https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/archive/refs/heads/master.zip"
-    ok "ComfyUI 拉取完成"
+    [ "$cloned" -eq 1 ] || die "所有源均失败。手动下载解压到 ${COMFY_DIR}：https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/archive/refs/heads/master.zip"
+    ok "ComfyUI 获取完成"
   fi
 
   cd "$COMFY_DIR" || die "无法进入 $COMFY_DIR"
